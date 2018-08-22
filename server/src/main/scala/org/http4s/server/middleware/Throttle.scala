@@ -39,8 +39,10 @@ class LocalTokenBucket[F[_]] private (capacity: Int, tokenCounter: Ref[F, Int]) 
 
 object LocalTokenBucket {
   def apply[F[_]](capacity: Int, refillEvery: FiniteDuration)(implicit F: Async[F], timer: Timer[F]): F[LocalTokenBucket[F]] = Ref[F].of(capacity).map { counter =>
+    println("newing")
     new LocalTokenBucket(capacity, counter)
   }.flatTap(bucket => {
+    println("streaming")
     Stream.fixedRate[F](refillEvery).evalMap(_ => bucket.addToken).compile.drain
   })
 }
