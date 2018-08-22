@@ -27,7 +27,11 @@ class ThrottleSpec extends Http4sSpec {
   }
 
   "Throttle" should {
-    "do a thing" in {
+    "allow a request to proceed when the rate limit has not been reached" in {
+      1 must_== 1
+    }
+
+    "deny a request when the rate limit had been reached" in {
       1 must_== 1
     }
   }

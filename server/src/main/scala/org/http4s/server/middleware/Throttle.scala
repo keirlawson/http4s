@@ -12,6 +12,7 @@ sealed trait TokenAvailability
 case object TokenAvailable extends TokenAvailability
 case object TokenUnavailable extends TokenAvailability
 
+//FIXME scaladoc
 //FIXME general refactor
 trait TokenBucket[F[_]] {
   def takeToken: F[TokenAvailability]
@@ -44,19 +45,20 @@ object LocalTokenBucket {
   })
 }
 
-//FIXME add constructor to pass own bucket
 //FIXME option to set 429 body?
 object Throttle {
   def apply[F[_], G[_]](amount: Int, per: FiniteDuration)(http: Http[F, G])(implicit F: Async[F], timer: Timer[F]): Http[F, G] = {
     val refillFrequency = per / amount.toLong
     val createBucket = LocalTokenBucket(amount, refillFrequency)
-    Kleisli.liftF(createBucket).flatMap({ bucket =>
-      Kleisli { req =>
-        bucket.takeToken.flatMap {
-          case TokenAvailable => http(req)
-          case TokenUnavailable => Response[G](Status.TooManyRequests).pure[F]
-        }
+    Kleisli.liftF(createBucket).flatMap(apply(_)(http))
+  }
+
+  def apply[F[_], G[_]](bucket: TokenBucket[F])(http: Http[F, G])(implicit F: Async[F]): Http[F, G] = {
+    Kleisli { req =>
+      bucket.takeToken.flatMap {
+        case TokenAvailable => http(req)
+        case TokenUnavailable => Response[G](Status.TooManyRequests).pure[F]
       }
-    })
+    }
   }
 }
