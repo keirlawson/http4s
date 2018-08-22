@@ -12,15 +12,13 @@ sealed trait TokenAvailability
 case object TokenAvailable extends TokenAvailability
 case object TokenUnavailable extends TokenAvailability
 
-//FIXME add tests
 //FIXME general refactor
-//FIXME default lower limit for token update frequency?
 trait TokenBucket[F[_]] {
-  def takeToken: F[Boolean]
+  def takeToken: F[TokenAvailability]
 }
 
 class LocalTokenBucket[F[_]] private (capacity: Int, tokenCounter: Ref[F, Int]) extends TokenBucket[F] {
-  def takeToken: F[TokenAvailability] = {
+  override def takeToken: F[TokenAvailability] = {
     tokenCounter.modify({
       case 0 => (0, TokenUnavailable)
       case value: Int => (value - 1, TokenAvailable)
@@ -46,7 +44,7 @@ object LocalTokenBucket {
   })
 }
 
-//FIXME add constructor to pass own Throttle
+//FIXME add constructor to pass own bucket
 //FIXME option to set 429 body?
 object Throttle {
   def apply[F[_], G[_]](amount: Int, per: FiniteDuration)(http: Http[F, G])(implicit F: Async[F], timer: Timer[F]): Http[F, G] = {
