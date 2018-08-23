@@ -5,7 +5,6 @@ import org.http4s.Http4sSpec
 import scala.concurrent.duration._
 import cats.implicits._
 
-//FIXME implement
 class ThrottleSpec extends Http4sSpec {
   "LocalTokenBucket" should {
 
@@ -15,8 +14,7 @@ class ThrottleSpec extends Http4sSpec {
 
       createBucket.flatMap(testee => {
 
-        //FIXME bet this can be done with a traverse
-        val takeFiveTokens: IO[List[TokenAvailability]] = (1 to 5).map(_ => testee.takeToken).toList.sequence
+        val takeFiveTokens: IO[List[TokenAvailability]] = (1 to 5).toList.traverse(_ => testee.takeToken)
         val checkTokensUpToCapacity = takeFiveTokens.map(tokens => tokens must not contain TokenUnavailable)
         val checkTokenAfterCapacity = testee.takeToken.map(_ must_== TokenUnavailable)
         checkTokensUpToCapacity >> checkTokenAfterCapacity
@@ -24,22 +22,31 @@ class ThrottleSpec extends Http4sSpec {
     }
 
     "add another token at specified interval when not at capacity" in {
-      1 must_== 1
+      val capacity = 1
+      val createBucket = LocalTokenBucket[IO](capacity, 100.milliseconds)
+
+      val takeTokenAfterRefill = createBucket.flatMap(testee => {
+        testee.takeToken >> IO { Thread.sleep(500) } >> testee.takeToken
+      })
+
+      takeTokenAfterRefill must returnValue(TokenAvailable)
     }
 
+    //FIXME if refill happens to occur in middle of taking tokens test will fail
     "not add another token at specified interval when at capacity" in {
-      1 must_== 1
-    }
+      val capacity = 5
+      val createBucket = LocalTokenBucket[IO](capacity, 100.milliseconds)
 
-    "remove a token and return TokenAvailable when takeToken called and there are tokens available" in {
-      1 must_== 1
-    }
+      val takeExtraToken = createBucket.flatMap(testee => {
+        val takeFiveTokens: IO[List[TokenAvailability]] = (1 to 5).toList.traverse(_ => testee.takeToken)
+        IO { Thread.sleep(500) } >> takeFiveTokens >> testee.takeToken
+      })
 
-    "return TokenUnavailable when there are no tokens remaining and takeToken is called" in {
-      1 must_== 1
+      takeExtraToken must returnValue(TokenUnavailable)
     }
   }
-
+  
+  //FIXME implement
   "Throttle" should {
     "allow a request to proceed when the rate limit has not been reached" in {
       1 must_== 1
