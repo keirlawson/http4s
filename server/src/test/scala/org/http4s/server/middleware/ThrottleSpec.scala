@@ -3,7 +3,7 @@ package org.http4s.server.middleware
 import cats.effect.IO
 import org.http4s.Http4sSpec
 import scala.concurrent.duration._
-//import cats.implicits._
+import cats.implicits._
 
 //FIXME implement
 class ThrottleSpec extends Http4sSpec {
@@ -13,19 +13,14 @@ class ThrottleSpec extends Http4sSpec {
       val capacity = 5
       val createBucket = LocalTokenBucket[IO](capacity, 365.days)
 
-      createBucket.unsafeRunSync()
+      createBucket.flatMap(testee => {
 
-      println("ran it")
-
-//      createBucket.flatMap(testee => {
-//
-//        //FIXME bet this can be done with a traverse
-//        println("got here")
-//        val takeFiveTokens: IO[List[TokenAvailability]] = (1 to 5).map(_ => testee.takeToken).toList.sequence
-//        val checkTokens = takeFiveTokens.map(tokens => tokens must contain(TokenAvailable))
-//        checkTokens
-//      }).unsafeRunSync
-      1 must_== 1
+        //FIXME bet this can be done with a traverse
+        val takeFiveTokens: IO[List[TokenAvailability]] = (1 to 5).map(_ => testee.takeToken).toList.sequence
+        val checkTokensUpToCapacity = takeFiveTokens.map(tokens => tokens must not contain TokenUnavailable)
+        val checkTokenAfterCapacity = testee.takeToken.map(_ must_== TokenUnavailable)
+        checkTokensUpToCapacity >> checkTokenAfterCapacity
+      }).unsafeRunSync
     }
 
     "add another token at specified interval when not at capacity" in {
