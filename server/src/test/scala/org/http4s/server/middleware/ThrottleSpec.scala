@@ -1,9 +1,11 @@
 package org.http4s.server.middleware
 
+import cats.data.OptionT
 import cats.effect.IO
-import org.http4s.Http4sSpec
+import org.http4s.{Http, Http4sSpec, HttpRoutes, Response}
 import scala.concurrent.duration._
 import cats.implicits._
+import org.http4s.dsl.io.{Ok, Unauthorized}
 
 class ThrottleSpec extends Http4sSpec {
   "LocalTokenBucket" should {
@@ -48,7 +50,20 @@ class ThrottleSpec extends Http4sSpec {
   
   //FIXME implement
   "Throttle" should {
+    val routes = HttpRoutes.of[IO] {
+      case req if req.pathInfo == "/foo" => Response[IO](Ok).withEntity("foo").pure[IO]
+      case req if req.pathInfo == "/bar" => Response[IO](Unauthorized).withEntity("bar").pure[IO]
+    }
+
     "allow a request to proceed when the rate limit has not been reached" in {
+      val untok = new TokenBucket[IO] {
+        override def takeToken
+          : IO[TokenAvailability] = TokenAvailable.pure[IO]
+      }
+
+      val testcors = CORS(routes)//This compiles
+      val testee = Throttle(untok)(routes)//But this doesn't??????
+
       1 must_== 1
     }
 
