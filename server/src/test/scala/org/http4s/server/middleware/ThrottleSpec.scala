@@ -1,11 +1,10 @@
 package org.http4s.server.middleware
 
-import cats.data.OptionT
 import cats.effect.IO
-import org.http4s.{Http, Http4sSpec, HttpRoutes, Response}
+import org.http4s.{Http4sSpec, HttpApp, Request, Status}
 import scala.concurrent.duration._
 import cats.implicits._
-import org.http4s.dsl.io.{Ok, Unauthorized}
+import org.http4s.dsl.io._
 
 class ThrottleSpec extends Http4sSpec {
   "LocalTokenBucket" should {
@@ -47,28 +46,34 @@ class ThrottleSpec extends Http4sSpec {
       takeExtraToken must returnValue(TokenUnavailable)
     }
   }
-  
-  //FIXME implement
+
   "Throttle" should {
-    val routes = HttpRoutes.of[IO] {
-      case req if req.pathInfo == "/foo" => Response[IO](Ok).withEntity("foo").pure[IO]
-      case req if req.pathInfo == "/bar" => Response[IO](Unauthorized).withEntity("bar").pure[IO]
+    val alwaysOkApp = HttpApp[IO] { _ =>
+      Ok()
     }
 
     "allow a request to proceed when the rate limit has not been reached" in {
-      val untok = new TokenBucket[IO] {
+      val limitNotReachedBucket = new TokenBucket[IO] {
         override def takeToken
           : IO[TokenAvailability] = TokenAvailable.pure[IO]
       }
 
-      val testcors = CORS(routes)//This compiles
-      val testee = Throttle(untok)(routes)//But this doesn't??????
+      val testee = Throttle(limitNotReachedBucket)(alwaysOkApp)
+      val req = Request[IO](uri = uri("/"))
 
-      1 must_== 1
+      testee(req) must returnStatus(Status.Ok)
     }
 
     "deny a request when the rate limit had been reached" in {
-      1 must_== 1
+      val limitReachedBucket = new TokenBucket[IO] {
+        override def takeToken
+        : IO[TokenAvailability] = TokenUnavailable.pure[IO]
+      }
+
+      val testee = Throttle(limitReachedBucket)(alwaysOkApp)
+      val req = Request[IO](uri = uri("/"))
+
+      testee(req) must returnStatus(Status.TooManyRequests)
     }
   }
 }
