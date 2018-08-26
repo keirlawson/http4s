@@ -13,8 +13,14 @@ sealed trait TokenAvailability
 case object TokenAvailable extends TokenAvailability
 case object TokenUnavailable extends TokenAvailability
 
+/*
+ * TODO:
+ * Function to decide on throttle response
+ * Function to decide how many tokens
+ *
+ */
+
 //FIXME scaladoc
-//FIXME general refactor
 trait TokenBucket[F[_]] {
   def takeToken: F[TokenAvailability]
 }
@@ -47,7 +53,6 @@ object LocalTokenBucket {
   })
 }
 
-//FIXME option to set 429 body?
 object Throttle {
   def apply[F[_], G[_]](amount: Int, per: FiniteDuration)(http: Http[F, G])(implicit F: Concurrent[F], timer: Timer[F]): Http[F, G] = {
     val refillFrequency = per / amount.toLong
