@@ -7,7 +7,6 @@ import cats.effect.concurrent.Ref
 import scala.concurrent.duration._
 import cats.implicits._
 import fs2.Stream
-import cats.effect.syntax.concurrent._
 
 sealed trait TokenAvailability
 case object TokenAvailable extends TokenAvailability
@@ -31,16 +30,17 @@ trait TokenBucket[F[_]] {
   def takeToken: F[TokenAvailability]
 }
 
-class LocalTokenBucket[F[_]] private (capacity: Int, tokenCounter: Ref[F, Int]) extends TokenBucket[F] {
-  override def takeToken: F[TokenAvailability] = {
-    tokenCounter.modify({
-      case 0 => (0, TokenUnavailable)
-      case value: Int => (value - 1, TokenAvailable)
-    })
+object TokenBucket {
+  def local[F[_]](capacity: Int, refillEvery: FiniteDuration)(implicit F: Concurrent[F], timer: Timer[F]): Stream[F, TokenBucket[F]] = {
+    Stream.eval(Ref[F].of(capacity)).flatMap { counter =>
+      val refill = Stream.fixedRate[F](refillEvery).evalMap(_ => updateCounter(capacity, counter))
+      val bucket = createLocalBucket(counter)
+      Stream.emit(bucket).covary[F].flatMap(x => refill.as(x))
+    }
   }
 
-  def addToken: F[Unit] = {
-    tokenCounter.update { count =>
+  private def updateCounter[F[_]](capacity: Int, counter: Ref[F, Int]): F[Unit] = {
+    counter.update { count =>
       if (count < capacity) {
         count + 1
       } else {
@@ -48,23 +48,23 @@ class LocalTokenBucket[F[_]] private (capacity: Int, tokenCounter: Ref[F, Int]) 
       }
     }
   }
-}
 
-object LocalTokenBucket {
-  def apply[F[_]](capacity: Int, refillEvery: FiniteDuration)(implicit F: Concurrent[F], timer: Timer[F]): F[LocalTokenBucket[F]] = Ref[F].of(capacity).map { counter =>
-    new LocalTokenBucket(capacity, counter)
-  }.flatTap(bucket => {
-    val refill = Stream.fixedRate[F](refillEvery).evalMap(_ => bucket.addToken).compile.drain
-    refill.start.void
-  })
+  private def createLocalBucket[F[_]](counter: Ref[F, Int]): TokenBucket[F] = new TokenBucket[F] {
+    override def takeToken: F[TokenAvailability] = {
+      counter.modify({
+        case 0 => (0, TokenUnavailable)
+        case value: Int => (value - 1, TokenAvailable)
+      })
+    }
+  }
 }
 
 object Throttle {
-  def apply[F[_], G[_]](amount: Int, per: FiniteDuration)(http: Http[F, G])(implicit F: Concurrent[F], timer: Timer[F]): Http[F, G] = {
-    val refillFrequency = per / amount.toLong
-    val createBucket = LocalTokenBucket(amount, refillFrequency)
-    Kleisli.liftF(createBucket).flatMap(apply(_)(http))
-  }
+//  def apply[F[_], G[_]](amount: Int, per: FiniteDuration)(http: Http[F, G])(implicit F: Concurrent[F], timer: Timer[F]): Http[F, G] = {
+//    val refillFrequency = per / amount.toLong
+//    val createBucket = LocalTokenBucket(amount, refillFrequency)
+//    Kleisli.liftF(createBucket).flatMap(apply(_)(http))
+//  }
 
   def apply[F[_], G[_]](bucket: TokenBucket[F])(http: Http[F, G])(implicit F: Concurrent[F]): Http[F, G] = {
     Kleisli { req =>
