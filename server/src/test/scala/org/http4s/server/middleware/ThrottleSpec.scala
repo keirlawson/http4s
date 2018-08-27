@@ -6,6 +6,7 @@ import scala.concurrent.duration._
 import cats.implicits._
 import org.http4s.dsl.io._
 
+//FIXME look at testcontext in cats-effect
 class ThrottleSpec extends Http4sSpec {
   "LocalTokenBucket" should {
 

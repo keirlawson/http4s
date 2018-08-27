@@ -17,6 +17,12 @@ case object TokenUnavailable extends TokenAvailability
  * TODO:
  * Function to decide on throttle response
  * Function to decide how many tokens
+ * Make takeToken a function on a Request
+ *
+ * add tokenbucket.local constructor, without named LocalTokenBucket
+ * add means of shutting down the refill stream (.start.map rather than flattap)
+ * add stream/bracket constructor for localtokenbucket
+ * look at stream.supervise - not released yet
  *
  */
 
