@@ -20,7 +20,7 @@ class ThrottleSpec extends Http4sSpec {
         val checkTokensUpToCapacity = takeFiveTokens.map(tokens => tokens must not contain TokenUnavailable)
         val checkTokenAfterCapacity = testee.takeToken.map(_ must_== TokenUnavailable)
         checkTokensUpToCapacity >> checkTokenAfterCapacity
-      }).compile.drain.unsafeRunSync
+      }).compile.toList.map(_.head).unsafeRunSync
     }
 
     "add another token at specified interval when not at capacity" in {
@@ -31,7 +31,7 @@ class ThrottleSpec extends Http4sSpec {
         testee.takeToken >> IO { Thread.sleep(500) } >> testee.takeToken
       })
 
-      takeTokenAfterRefill.compile.drain must returnValue(TokenAvailable)
+      takeTokenAfterRefill.compile.toList.map(_.head) must returnValue(TokenAvailable)
     }
 
     //FIXME if refill happens to occur in middle of taking tokens test will fail
@@ -44,7 +44,7 @@ class ThrottleSpec extends Http4sSpec {
         IO { Thread.sleep(500) } >> takeFiveTokens >> testee.takeToken
       })
 
-      takeExtraToken.compile.drain must returnValue(TokenUnavailable)
+      takeExtraToken.compile.toList.map(_.head) must returnValue(TokenUnavailable)
     }
   }
 

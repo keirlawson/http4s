@@ -18,11 +18,7 @@ case object TokenUnavailable extends TokenAvailability
  * Function to decide how many tokens
  * Make takeToken a function on a Request
  *
- * add tokenbucket.local constructor, without named LocalTokenBucket
- * add means of shutting down the refill stream (.start.map rather than flattap)
- * add stream/bracket constructor for localtokenbucket
- * look at stream.supervise - not released yet
- *
+ * Consider replacing commented apply
  */
 
 //FIXME scaladoc
@@ -33,28 +29,18 @@ trait TokenBucket[F[_]] {
 object TokenBucket {
   def local[F[_]](capacity: Int, refillEvery: FiniteDuration)(implicit F: Concurrent[F], timer: Timer[F]): Stream[F, TokenBucket[F]] = {
     Stream.eval(Ref[F].of(capacity)).flatMap { counter =>
-      val refill = Stream.fixedRate[F](refillEvery).evalMap(_ => updateCounter(capacity, counter))
-      val bucket = createLocalBucket(counter)
-      Stream.emit(bucket).covary[F].flatMap(x => refill.as(x))
-    }
-  }
-
-  private def updateCounter[F[_]](capacity: Int, counter: Ref[F, Int]): F[Unit] = {
-    counter.update { count =>
-      if (count < capacity) {
-        count + 1
-      } else {
-        count
+      val refill = Stream.fixedRate[F](refillEvery).evalMap(_ =>
+        counter.update { count =>Math.min(count + 1, capacity) }
+      )
+      val bucket = new TokenBucket[F] {
+        override def takeToken: F[TokenAvailability] = {
+          counter.modify({
+            case 0 => (0, TokenUnavailable)
+            case value: Int => (value - 1, TokenAvailable)
+          })
+        }
       }
-    }
-  }
-
-  private def createLocalBucket[F[_]](counter: Ref[F, Int]): TokenBucket[F] = new TokenBucket[F] {
-    override def takeToken: F[TokenAvailability] = {
-      counter.modify({
-        case 0 => (0, TokenUnavailable)
-        case value: Int => (value - 1, TokenAvailable)
-      })
+      Stream(bucket).concurrently(refill)
     }
   }
 }
