@@ -29,7 +29,6 @@ trait TokenBucket[F[_]] {
 object TokenBucket {
   def local[F[_]](capacity: Int, refillEvery: FiniteDuration)(implicit F: Concurrent[F], timer: Timer[F]): Stream[F, TokenBucket[F]] = {
     Stream.eval(Ref[F].of(capacity)).flatMap { counter =>
-      println("evaling")
       val refill = Stream.fixedRate[F](refillEvery).evalMap(_ =>
         counter.update { count =>Math.min(count + 1, capacity) }
       )
@@ -41,9 +40,7 @@ object TokenBucket {
           })
         }
       }
-      println(refill)
-      println("defined")
-      Stream(bucket).concurrently(refill)//FIXME commenting out .concurrently(refill) allows test to pass
+      Stream(bucket).concurrently(refill)
     }
   }
 }

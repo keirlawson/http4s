@@ -3,35 +3,34 @@ package org.http4s.server.middleware
 import cats.effect.{IO, Timer}
 import cats.effect.laws.util.TestContext
 import org.http4s.{Http4sSpec, HttpApp, Request, Status}
-import scala.concurrent.duration._
 import cats.implicits._
 import org.http4s.dsl.io._
 import cats.effect.IO.ioConcurrentEffect
+import org.specs2.matcher.FutureMatchers
+import scala.concurrent.duration._
+import org.specs2.concurrent.ExecutionEnv
 
 //FIXME look at testcontext in cats-effect
-class ThrottleSpec extends Http4sSpec {
+class ThrottleSpec(implicit ee: ExecutionEnv) extends Http4sSpec with FutureMatchers {
   "LocalTokenBucket" should {
 
-    val ctx = TestContext()
-    implicit val testTimer: Timer[IO] = ctx.timer[IO]
-
-    "thing" in {
-      1 must_== 1
-    }
-
     "contain initial number of tokens equal to specified capacity" in {
-      println("har")
+      val ctx = TestContext()
+      val testTimer: Timer[IO] = ctx.timer[IO]
+
       val someRefillTime = 1234.milliseconds
       val capacity = 5
       val createBucket = TokenBucket.local[IO](capacity, someRefillTime)(ioConcurrentEffect(testTimer), testTimer)
-      println("here")
 
-      IO { ctx.tick() } *> createBucket.evalMap(testee => {
-        println("her")
+      val result = createBucket.evalMap(testee => {
         val takeFiveTokens: IO[List[TokenAvailability]] = (1 to 5).toList.traverse(_ => testee.takeToken)
         val checkTokensUpToCapacity = takeFiveTokens.map(tokens => tokens must not contain TokenUnavailable)
-        checkTokensUpToCapacity >> testee.takeToken
-      }).compile.toList.map(_.head) must returnValue(TokenUnavailable)
+        checkTokensUpToCapacity *> testee.takeToken
+      }).compile.toList.map(_.head).unsafeToFuture()
+
+      ctx.tick()
+
+      result must beEqualTo(TokenUnavailable).await
     }
 
 //    "add another token at specified interval when not at capacity" in {
