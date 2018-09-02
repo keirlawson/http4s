@@ -10,7 +10,6 @@ import org.specs2.matcher.FutureMatchers
 import scala.concurrent.duration._
 import org.specs2.concurrent.ExecutionEnv
 
-//FIXME look at testcontext in cats-effect
 class ThrottleSpec(implicit ee: ExecutionEnv) extends Http4sSpec with FutureMatchers {
   "LocalTokenBucket" should {
 
@@ -20,42 +19,52 @@ class ThrottleSpec(implicit ee: ExecutionEnv) extends Http4sSpec with FutureMatc
 
       val someRefillTime = 1234.milliseconds
       val capacity = 5
-      val createBucket = TokenBucket.local[IO](capacity, someRefillTime)(ioConcurrentEffect(testTimer), testTimer)
+      val createBucket =
+        TokenBucket.local[IO](capacity, someRefillTime)(ioConcurrentEffect(testTimer), testTimer)
 
-      val result = createBucket.evalMap(testee => {
-        val takeFiveTokens: IO[List[TokenAvailability]] = (1 to 5).toList.traverse(_ => testee.takeToken)
-        val checkTokensUpToCapacity = takeFiveTokens.map(tokens => tokens must not contain TokenUnavailable)
-        checkTokensUpToCapacity *> testee.takeToken
-      }).compile.toList.map(_.head).unsafeToFuture()
+      val result = createBucket
+        .evalMap(testee => {
+          val takeFiveTokens: IO[List[TokenAvailability]] =
+            (1 to 5).toList.traverse(_ => testee.takeToken)
+          val checkTokensUpToCapacity =
+            takeFiveTokens.map(tokens => tokens must not contain TokenUnavailable)
+          checkTokensUpToCapacity *> testee.takeToken
+        })
+        .compile
+        .toList
+        .map(_.head)
+        .unsafeToFuture()
 
       ctx.tick()
 
       result must beEqualTo(TokenUnavailable).await
     }
 
-        "add another token at specified interval when not at capacity" in {
-          val ctx = TestContext()
-          val testTimer: Timer[IO] = ctx.timer[IO]
+    "add another token at specified interval when not at capacity" in {
+      val ctx = TestContext()
+      val testTimer: Timer[IO] = ctx.timer[IO]
 
-          val capacity = 1
-          val createBucket =  TokenBucket.local[IO](capacity, 100.milliseconds)(ioConcurrentEffect(testTimer), testTimer)
+      val capacity = 1
+      val createBucket =
+        TokenBucket.local[IO](capacity, 100.milliseconds)(ioConcurrentEffect(testTimer), testTimer)
 
-          val takeTokenAfterRefill = createBucket.evalMap(testee => {
-            testee.takeToken *> IO { println("sliping"); testTimer.sleep(500.milliseconds) } *> testee.takeToken
-          })
+      val takeTokenAfterRefill = createBucket.evalMap(testee => {
+        testee.takeToken *> testTimer.sleep(101.milliseconds) *> testee.takeToken
+      })
 
-          val result = takeTokenAfterRefill.compile.toList.map(_.head).unsafeToFuture()
+      val result = takeTokenAfterRefill.compile.toList.map(_.head).unsafeToFuture()
 
-          ctx.tick(1000.milliseconds)
+      ctx.tick(101.milliseconds)
 
-          result must beEqualTo(TokenAvailable).await
-        }
+      result must beEqualTo(TokenAvailable).await
+    }
 
     "not add another token at specified interval when at capacity" in {
       val ctx = TestContext()
       val testTimer: Timer[IO] = ctx.timer[IO]
       val capacity = 5
-      val createBucket = TokenBucket.local[IO](capacity, 100.milliseconds)(ioConcurrentEffect(testTimer), testTimer)
+      val createBucket =
+        TokenBucket.local[IO](capacity, 100.milliseconds)(ioConcurrentEffect(testTimer), testTimer)
 
       val takeExtraToken = createBucket.evalMap(testee => {
         val takeFiveTokens: IO[List[TokenAvailability]] = (1 to 5).toList.traverse(_ => {
@@ -79,8 +88,7 @@ class ThrottleSpec(implicit ee: ExecutionEnv) extends Http4sSpec with FutureMatc
 
     "allow a request to proceed when the rate limit has not been reached" in {
       val limitNotReachedBucket = new TokenBucket[IO] {
-        override def takeToken
-          : IO[TokenAvailability] = TokenAvailable.pure[IO]
+        override def takeToken: IO[TokenAvailability] = TokenAvailable.pure[IO]
       }
 
       val testee = Throttle(limitNotReachedBucket)(alwaysOkApp)
@@ -91,8 +99,7 @@ class ThrottleSpec(implicit ee: ExecutionEnv) extends Http4sSpec with FutureMatc
 
     "deny a request when the rate limit had been reached" in {
       val limitReachedBucket = new TokenBucket[IO] {
-        override def takeToken
-        : IO[TokenAvailability] = TokenUnavailable.pure[IO]
+        override def takeToken: IO[TokenAvailability] = TokenUnavailable.pure[IO]
       }
 
       val testee = Throttle(limitReachedBucket)(alwaysOkApp)

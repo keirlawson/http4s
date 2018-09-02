@@ -27,22 +27,25 @@ trait TokenBucket[F[_]] {
 }
 
 object TokenBucket {
-  def local[F[_]](capacity: Int, refillEvery: FiniteDuration)(implicit F: Concurrent[F], timer: Timer[F]): Stream[F, TokenBucket[F]] = {
+  def local[F[_]](capacity: Int, refillEvery: FiniteDuration)(
+      implicit F: Concurrent[F],
+      timer: Timer[F]): Stream[F, TokenBucket[F]] =
     Stream.eval(Ref[F].of(capacity)).flatMap { counter =>
-      val refill = Stream.fixedRate[F](refillEvery).evalMap(_ =>
-        counter.update { count =>Math.min(count + 1, capacity) }
-      )
+      val refill = Stream
+        .fixedRate[F](refillEvery)
+        .evalMap(_ =>
+          counter.update { count =>
+            Math.min(count + 1, capacity)
+        })
       val bucket = new TokenBucket[F] {
-        override def takeToken: F[TokenAvailability] = {
+        override def takeToken: F[TokenAvailability] =
           counter.modify({
             case 0 => (0, TokenUnavailable)
             case value: Int => (value - 1, TokenAvailable)
           })
-        }
       }
       Stream(bucket).concurrently(refill)
     }
-  }
 }
 
 object Throttle {
@@ -52,12 +55,12 @@ object Throttle {
 //    Kleisli.liftF(createBucket).flatMap(apply(_)(http))
 //  }
 
-  def apply[F[_], G[_]](bucket: TokenBucket[F])(http: Http[F, G])(implicit F: Concurrent[F]): Http[F, G] = {
+  def apply[F[_], G[_]](bucket: TokenBucket[F])(http: Http[F, G])(
+      implicit F: Concurrent[F]): Http[F, G] =
     Kleisli { req =>
       bucket.takeToken.flatMap {
         case TokenAvailable => http(req)
         case TokenUnavailable => Response[G](Status.TooManyRequests).pure[F]
       }
     }
-  }
 }
