@@ -33,27 +33,24 @@ class ThrottleSpec(implicit ee: ExecutionEnv) extends Http4sSpec with FutureMatc
       result must beEqualTo(TokenUnavailable).await
     }
 
-//    "add another token at specified interval when not at capacity" in {
-//      val ctx = TestContext()
-//      val testTimer: Timer[IO] = ctx.timer[IO]
-//
-//      val capacity = 1
-//      val createBucket =  TokenBucket.local[IO](capacity, 100.milliseconds)(ioConcurrentEffect(testTimer), testTimer)
-//
-//      val takeTokenAfterRefill = createBucket.evalMap(testee => {
-//        testee.takeToken *> IO { ctx.tick(101.milliseconds) } *> testee.takeToken
-//      })
-//
-//      val result = takeTokenAfterRefill.compile.toList.map(_.head).unsafeToFuture()
-//
-//      ctx.tick()
-//      ctx.tick()
-//      ctx.tick()
-//
-//      result must beEqualTo(TokenAvailable).await
-//    }
+        "add another token at specified interval when not at capacity" in {
+          val ctx = TestContext()
+          val testTimer: Timer[IO] = ctx.timer[IO]
 
-//    //FIXME if refill happens to occur in middle of taking tokens test will fail
+          val capacity = 1
+          val createBucket =  TokenBucket.local[IO](capacity, 100.milliseconds)(ioConcurrentEffect(testTimer), testTimer)
+
+          val takeTokenAfterRefill = createBucket.evalMap(testee => {
+            testee.takeToken *> IO { println("sliping"); testTimer.sleep(500.milliseconds) } *> testee.takeToken
+          })
+
+          val result = takeTokenAfterRefill.compile.toList.map(_.head).unsafeToFuture()
+
+          ctx.tick(1000.milliseconds)
+
+          result must beEqualTo(TokenAvailable).await
+        }
+
     "not add another token at specified interval when at capacity" in {
       val ctx = TestContext()
       val testTimer: Timer[IO] = ctx.timer[IO]
@@ -61,13 +58,15 @@ class ThrottleSpec(implicit ee: ExecutionEnv) extends Http4sSpec with FutureMatc
       val createBucket = TokenBucket.local[IO](capacity, 100.milliseconds)(ioConcurrentEffect(testTimer), testTimer)
 
       val takeExtraToken = createBucket.evalMap(testee => {
-        val takeFiveTokens: IO[List[TokenAvailability]] = (1 to 5).toList.traverse(_ => testee.takeToken)
-        IO { ctx.tick(300.milliseconds) } >> takeFiveTokens >> testee.takeToken
+        val takeFiveTokens: IO[List[TokenAvailability]] = (1 to 5).toList.traverse(_ => {
+          testee.takeToken
+        })
+        testTimer.sleep(300.milliseconds) >> takeFiveTokens >> testee.takeToken
       })
 
       val result = takeExtraToken.compile.toList.map(_.head).unsafeToFuture()
 
-      ctx.tick()
+      ctx.tick(300.milliseconds)
 
       result must beEqualTo(TokenUnavailable).await
     }
