@@ -12,8 +12,11 @@ import org.specs2.concurrent.ExecutionEnv
 import Throttle._
 
 class ThrottleSpec(implicit ee: ExecutionEnv) extends Http4sSpec with FutureMatchers {
-  "LocalTokenBucket" should {
+  "local TokenBucket" should {
 
+    //FIXME add tests for RequestLimiters
+
+    //FIXME add test for taking multiple tokens
     "contain initial number of tokens equal to specified capacity" in {
       val ctx = TestContext()
       val testTimer: Timer[IO] = ctx.timer[IO]
@@ -26,16 +29,16 @@ class ThrottleSpec(implicit ee: ExecutionEnv) extends Http4sSpec with FutureMatc
       val takeExtraToken = createBucket
         .flatMap(testee => {
           val takeFiveTokens: IO[List[TokenAvailability]] =
-            (1 to 5).toList.traverse(_ => testee.takeToken)
+            (1 to 5).toList.traverse(_ => testee.takeTokens(1))
           val checkTokensUpToCapacity =
             takeFiveTokens.map(tokens =>
-              tokens must contain(TokenAvailable: TokenAvailability).forall)
-          checkTokensUpToCapacity *> testee.takeToken
+              tokens must contain(TokensAvailable: TokenAvailability).forall)
+          checkTokensUpToCapacity *> testee.takeTokens(1)
         })
 
       val result = takeExtraToken.unsafeToFuture()
 
-      result must haveClass[TokenUnavailable].await
+      result must haveClass[TokensUnavailable].await
     }
 
     "add another token at specified interval when not at capacity" in {
@@ -47,14 +50,14 @@ class ThrottleSpec(implicit ee: ExecutionEnv) extends Http4sSpec with FutureMatc
         TokenBucket.local[IO](capacity, 100.milliseconds)(ioEffect, testTimer.clock)
 
       val takeTokenAfterRefill = createBucket.flatMap(testee => {
-        testee.takeToken *> testTimer.sleep(101.milliseconds) *> testee.takeToken
+        testee.takeTokens(1) *> testTimer.sleep(101.milliseconds) *> testee.takeTokens(1)
       })
 
       val result = takeTokenAfterRefill.unsafeToFuture()
 
       ctx.tick(101.milliseconds)
 
-      result must beEqualTo(TokenAvailable).await
+      result must beEqualTo(TokensAvailable).await
     }
 
     "not add another token at specified interval when at capacity" in {
@@ -66,16 +69,16 @@ class ThrottleSpec(implicit ee: ExecutionEnv) extends Http4sSpec with FutureMatc
 
       val takeExtraToken = createBucket.flatMap(testee => {
         val takeFiveTokens: IO[List[TokenAvailability]] = (1 to 5).toList.traverse(_ => {
-          testee.takeToken
+          testee.takeTokens(1)
         })
-        testTimer.sleep(300.milliseconds) >> takeFiveTokens >> testee.takeToken
+        testTimer.sleep(300.milliseconds) >> takeFiveTokens >> testee.takeTokens(1)
       })
 
       val result = takeExtraToken.unsafeToFuture()
 
       ctx.tick(300.milliseconds)
 
-      result must haveClass[TokenUnavailable].await
+      result must haveClass[TokensUnavailable].await
     }
 
     "only return a single token when only one token available and there are multiple concurrent requests" in {
@@ -86,12 +89,12 @@ class ThrottleSpec(implicit ee: ExecutionEnv) extends Http4sSpec with FutureMatc
         TokenBucket.local[IO](capacity, 100.milliseconds)(ioEffect, testTimer.clock)
 
       val takeTokensSimultaneously = createBucket.flatMap(testee => {
-        (1 to 5).toList.parTraverse(_ => testee.takeToken)
+        (1 to 5).toList.parTraverse(_ => testee.takeTokens(1))
       })
 
       val result = takeTokensSimultaneously.unsafeToFuture()
 
-      result must contain(TokenAvailable: TokenAvailability).exactly(1.times).await
+      result must contain(TokensAvailable: TokenAvailability).exactly(1.times).await
     }
 
     "return the time until the next token is available when no token is available" in {
@@ -102,14 +105,14 @@ class ThrottleSpec(implicit ee: ExecutionEnv) extends Http4sSpec with FutureMatc
         TokenBucket.local[IO](capacity, 100.milliseconds)(ioEffect, testTimer.clock)
 
       val takeTwoTokens = createBucket.flatMap(testee => {
-        testee.takeToken *> testTimer.sleep(75.milliseconds) *> testee.takeToken
+        testee.takeTokens(1) *> testTimer.sleep(75.milliseconds) *> testee.takeTokens(1)
       })
 
       val result = takeTwoTokens.unsafeToFuture()
 
       ctx.tick(75.milliseconds)
 
-      result must beEqualTo(TokenUnavailable(Some(25.milliseconds))).await
+      result must beEqualTo(TokensUnavailable(Some(25.milliseconds))).await
     }
   }
 
@@ -119,8 +122,8 @@ class ThrottleSpec(implicit ee: ExecutionEnv) extends Http4sSpec with FutureMatc
     }
 
     "allow a request to proceed when the rate limit has not been reached" in {
-      val limitNotReachedBucket = new TokenBucket[IO] {
-        override def takeToken: IO[TokenAvailability] = TokenAvailable.pure[IO]
+      val limitNotReachedBucket = new RequestLimiter[IO, IO] {
+        override def takeToken(request: Request[IO]): IO[TokenAvailability] = TokensAvailable.pure[IO]
       }
 
       val testee = Throttle(limitNotReachedBucket)(alwaysOkApp)
@@ -130,8 +133,8 @@ class ThrottleSpec(implicit ee: ExecutionEnv) extends Http4sSpec with FutureMatc
     }
 
     "deny a request when the rate limit had been reached" in {
-      val limitReachedBucket = new TokenBucket[IO] {
-        override def takeToken: IO[TokenAvailability] = TokenUnavailable(None).pure[IO]
+      val limitReachedBucket = new RequestLimiter[IO, IO] {
+        override def takeToken(request: Request[IO]): IO[TokenAvailability] = TokensUnavailable(None).pure[IO]
       }
 
       val testee = Throttle(limitReachedBucket)(alwaysOkApp)
