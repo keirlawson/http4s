@@ -2,13 +2,15 @@ package org.http4s.server.middleware
 
 import org.http4s.{Http, Request, Response, Status}
 import cats.data.Kleisli
-import cats.effect.{Clock, Sync}
+import cats.effect.{Async, Clock, Sync}
 import cats.effect.concurrent.Ref
 import scala.concurrent.duration.FiniteDuration
 import cats.implicits._
 import cats.Applicative
+import java.net.InetAddress
 import java.util.concurrent.TimeUnit.NANOSECONDS
 import org.http4s.headers.`Content-Length`
+import org.http4s.internal.DefaultedMap
 import scala.concurrent.duration._
 
 /**
@@ -56,17 +58,25 @@ object Throttle {
       }
     }
 
-    //FIXME impl
-    def perIp[F[_], G[_]](capacity: Int, refillEvery: FiniteDuration)(
-      implicit F: Sync[F],
-      clock: Clock[F]): F[RequestLimiter[F, G]] = {
-      val b = TokenBucket.local(capacity, refillEvery)
+    //FIXME deal with possible bucket errors
+    //Each IP gets its own tokenbucket, so we take an F[Bucket] to allow us to create new ones
+    def perIp[F[_], G[_]](createBucket: F[TokenBucket[F]])(
+      implicit F: Async[F]): F[RequestLimiter[F, G]] = {
 
-      b.map { bu =>
+      val createMap = DefaultedMap.create[F, InetAddress, TokenBucket[F]](createBucket)
+
+      createMap.map({ map =>
         new RequestLimiter[F, G] {
-          override def takeToken(r: Request[G]): F[TokenAvailability] = bu.takeTokens(1)
+          override def takeToken(r: Request[G]): F[TokenAvailability] = {
+            val availability: F[TokenAvailability] = r.from match {//FIXME make from vs remote optional
+              case Some(address) => map.get(address).flatMap { _.takeTokens(1) }
+              case None => (TokensUnavailable(None): TokenAvailability).pure[F]
+            }
+            availability
+          }
         }
-      }
+      })
+
     }
 
   }
@@ -98,8 +108,8 @@ object Throttle {
                       .map(_.guard[Option].as(TokensAvailable))
                   } else {
                     val timeToNextToken = refillEvery.toNanos - timeDifference
-                    val successResponse = TokensUnavailable(timeToNextToken.nanos.some)
-                    setter((newTokenTotal, currentTime)).map(_.guard[Option].as(successResponse))
+                    val unavailable: TokenAvailability = TokensUnavailable(timeToNextToken.nanos.some)
+                    unavailable.some.pure[F]
                   }
 
                   attemptSet
