@@ -140,7 +140,7 @@ object Throttle {
       http: Http[F, G])(implicit F: Sync[F], timer: Clock[F]): F[Http[F, G]] = {
     val refillFrequency = per / amount.toLong
     val createBucket: F[TokenBucket[F]] = TokenBucket.local(amount, refillFrequency)
-    val createLimiter: F[RequestLimiter[F, G]] = createBucket.map(RequestLimiter.simple(_))
+    val createLimiter: F[RequestLimiter[F, G]] = createBucket.map(RequestLimiter.simple)
     createLimiter.map(limiter => apply(limiter)(http))
   }
 
