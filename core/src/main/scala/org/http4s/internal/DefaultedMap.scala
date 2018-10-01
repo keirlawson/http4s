@@ -4,12 +4,14 @@ import cats.effect.Async
 import cats.effect.concurrent.{Deferred, Ref}
 import cats.implicits._
 
+//FIXME better name? LazyTable?
 trait DefaultedMap[F[_], A, B] {
   def get(key: A): F[B]
 }
 
+//FIXME createDefault should be A => F[B]
 //FIXME base on concurrent version of memoize
-//FIXME Either for errors
+//FIXME Either for errors - or do we just attempt a create again on a new get?
 //FIXME what do we do in case of error? probably permit request
 //FIXME what about interupts?
 object DefaultedMap {
